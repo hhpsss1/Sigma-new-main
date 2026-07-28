@@ -27,6 +27,7 @@ import net.minecraft.network.protocol.game.ServerboundUseItemPacket;
 import net.minecraft.util.Mth;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
+import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.decoration.ArmorStand;
@@ -130,6 +131,13 @@ public class KillAura extends Module {
             "Swing Order Mode",
             new String[]{"1.8", "1.9.x", "No Order"},
             "1.9.x"
+    );
+
+    @Setting
+    private final BooleanValue onlyCriticals = new BooleanValue(
+            "Only Criticals",
+            false,
+            () -> swingOrderMode.get().equalsIgnoreCase("1.9.x")
     );
 
     @Setting
@@ -786,6 +794,11 @@ public class KillAura extends Module {
     }
 
     private boolean attackCooldownMath(Entity target) {
+        if (onlyCriticals.get() && swingOrderMode.get().equalsIgnoreCase("1.9.x")) {
+            if (!isCriticalReady())
+                return false;
+        }
+
         switch (apsMode.get().toLowerCase(Locale.ROOT)) {
             case "cooldown":
                 return mc.player.getAttackStrengthScale(0f) >= (quickCooldown.get() ? 0.8f : 1f);
@@ -807,6 +820,28 @@ public class KillAura extends Module {
         }
 
         return false;
+    }
+
+    private boolean isCriticalReady() {
+        if (mc.player == null) return false;
+
+        boolean notOnGround = !mc.player.onGround();
+        boolean notOnLadder = !mc.player.onClimbable();
+        boolean notInWater = !mc.player.isInWater();
+        boolean notBlinded = !mc.player.hasEffect(MobEffects.BLINDNESS);
+        boolean notRiding = !mc.player.isPassenger();
+        
+        double motionY = mc.player.getDeltaMovement().y;
+        boolean isFalling = motionY < -0.05; 
+
+        boolean willLandSoon = false;
+        if (notOnGround && isFalling) {
+            // Predicate landing in the very next moment
+            AABB futureBox = mc.player.getBoundingBox().move(0, motionY - 0.05, 0);
+            willLandSoon = !mc.level.noCollision(mc.player, futureBox);
+        }
+
+        return isFalling && notOnGround && notOnLadder && notInWater && notBlinded && notRiding && willLandSoon;
     }
 
     private int nextRandomizedCpsDelay() {
@@ -1225,6 +1260,14 @@ public class KillAura extends Module {
 
         int oldSlot = mc.player.getInventory().getSelectedSlot();
         int spoofSlot = findEmptySlot(oldSlot);
+        PacketUtil.sendPacket(new ServerboundSetCarriedItemPacket(spoofSlot));
+        PacketUtil.sendPacket(new ServerboundSetCarriedItemPacket(oldSlot));
+    }
+
+    private void spoofAutoBlockSlot(int spoofSlot) {
+        if (mc.player == null) return;
+
+        int oldSlot = mc.player.getInventory().getSelectedSlot();
         PacketUtil.sendPacket(new ServerboundSetCarriedItemPacket(spoofSlot));
         PacketUtil.sendPacket(new ServerboundSetCarriedItemPacket(oldSlot));
     }
